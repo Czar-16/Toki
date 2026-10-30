@@ -3,6 +3,8 @@
 A simple study timer for **Linux and macOS**. Set a countdown or study for as
 long as you like. Pause anytime, take a calculated break, and check your study totals.
 
+![Toki terminal demo](assets/demo.gif)
+
 - Live progress bar and pause/resume.
 - Optional spoken audio cues.
 - Stats for today, the last seven days, and this month.
