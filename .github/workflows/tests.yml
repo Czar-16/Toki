@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   test:
+    timeout-minutes: 5
     strategy:
       fail-fast: false
       matrix:
@@ -17,8 +18,8 @@ jobs:
         python: ['3.10', '3.13']
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
       - name: Install Fish (Linux)
@@ -30,4 +31,5 @@ jobs:
       - name: Check Fish syntax
         run: fish -n fish/*.fish
       - name: Test
+        timeout-minutes: 3
         run: python3 -m unittest discover -s tests -v

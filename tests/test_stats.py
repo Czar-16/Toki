@@ -14,7 +14,6 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import stats
-import countdown
 
 
 def add_many(path, count):
@@ -120,15 +119,14 @@ class TerminalTests(unittest.TestCase):
         self.temp.cleanup()
 
     def launch(self, duration=2, label='Work'):
+        # macOS requires an exec immediately after fork when higher-level APIs
+        # have already run. Exercise the real CLI in a clean interpreter.
+        environment = dict(os.environ, TOKI_DATA_DIR=str(self.path.parent))
+        command = [sys.executable, str(Path(__file__).resolve().parents[1] / 'countdown.py'),
+                   str(duration), label, str(self.result)]
         pid, fd = pty.fork()
         if pid == 0:
-            countdown.Tracker = lambda: stats.Tracker(stats.Store(self.path))
-            try:
-                code = countdown.countdown(duration, label, self.result)
-            except BaseException as error:
-                print(repr(error), flush=True)
-                os._exit(2)
-            os._exit(code)
+            os.execve(sys.executable, command, environment)
         self.children.append((pid, fd))
         self.until(fd, b'RUNNING')
         return pid, fd
@@ -149,9 +147,15 @@ class TerminalTests(unittest.TestCase):
                 os.read(fd, 65536)
 
     def finish(self, pid, fd, code):
-        _, status = os.waitpid(pid, 0)
-        self.assertEqual(os.waitstatus_to_exitcode(status), code)
-        self.assertTrue(termios.tcgetattr(fd)[3] & termios.ECHO)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            done, status = os.waitpid(pid, os.WNOHANG)
+            if done:
+                self.assertEqual(os.waitstatus_to_exitcode(status), code)
+                self.assertTrue(termios.tcgetattr(fd)[3] & termios.ECHO)
+                return
+            time.sleep(.02)
+        self.fail('Timer did not exit after finishing')
 
     def total(self):
         return stats.Store(self.path).totals()[0]
