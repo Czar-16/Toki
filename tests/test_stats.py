@@ -152,7 +152,16 @@ class TerminalTests(unittest.TestCase):
                 os.read(fd, 65536)
 
     def finish(self, pid, fd, code):
-        self.assertEqual(self.process(pid).wait(timeout=5), code)
+        process = self.process(pid)
+        deadline = time.monotonic() + 5
+        while process.poll() is None:
+            self.assertLess(time.monotonic(), deadline, 'Timer did not exit after finishing')
+            if select.select([fd], [], [], .05)[0]:
+                try:
+                    os.read(fd, 65536)
+                except OSError:
+                    pass  # Linux reports EIO when the slave has closed.
+        self.assertEqual(process.returncode, code)
         self.assertTrue(termios.tcgetattr(fd)[3] & termios.ECHO)
 
     def total(self):

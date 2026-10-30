@@ -119,7 +119,9 @@ def countdown(duration, label, result):
                 pass  # The terminal may have been closed.
         finally:
             try:
-                termios.tcsetattr(fd, termios.TCSADRAIN, original)
+                # Restore input settings immediately. Waiting for output to
+                # drain can block indefinitely on a macOS PTY after completion.
+                termios.tcsetattr(fd, termios.TCSANOW, original)
             except OSError:
                 pass
             os.close(fd)
