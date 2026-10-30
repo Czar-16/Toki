@@ -25,7 +25,8 @@ def countdown(duration, label, result):
     paused = False
     status = 130
     tracker = Tracker() if label == 'Work' else None
-    fd = os.open('/dev/tty', os.O_RDWR)
+    # An inherited PTY works even without a controlling terminal (e.g. tests).
+    fd = os.dup(sys.stdin.fileno()) if sys.stdin.isatty() else os.open('/dev/tty', os.O_RDWR)
     original = termios.tcgetattr(fd)
     last = time.monotonic()
     last_wall = time.time()
@@ -75,6 +76,11 @@ def countdown(duration, label, result):
     old_signals = {sig: signal.signal(sig, interrupted) for sig in (signal.SIGTERM, signal.SIGHUP)}
     try:
         tty.setcbreak(fd)
+        settings = termios.tcgetattr(fd)
+        # Handle Ctrl+C as a key ourselves; this also works in an inherited PTY
+        # whose foreground process group is not controlled by the parent shell.
+        settings[3] &= ~termios.ISIG
+        termios.tcsetattr(fd, termios.TCSANOW, settings)
         write('\033[?25l')
         last, last_wall = time.monotonic(), time.time()
         while True:

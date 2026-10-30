@@ -5,6 +5,7 @@ from pathlib import Path
 import pty
 import select
 import signal
+import subprocess
 import sys
 import tempfile
 import termios
@@ -109,27 +110,31 @@ class TerminalTests(unittest.TestCase):
         self.children = []
 
     def tearDown(self):
-        for pid, fd in self.children:
-            try:
-                os.kill(pid, signal.SIGKILL)
-                os.waitpid(pid, 0)
-            except (ProcessLookupError, ChildProcessError):
-                pass
+        for process, fd in self.children:
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=5)
             os.close(fd)
         self.temp.cleanup()
 
     def launch(self, duration=2, label='Work'):
-        # macOS requires an exec immediately after fork when higher-level APIs
-        # have already run. Exercise the real CLI in a clean interpreter.
+        # Avoid forkpty, which can hang in a macOS process that has run other
+        # libraries. Popen executes the actual CLI without Python after fork.
         environment = dict(os.environ, TOKI_DATA_DIR=str(self.path.parent))
         command = [sys.executable, str(Path(__file__).resolve().parents[1] / 'countdown.py'),
                    str(duration), label, str(self.result)]
-        pid, fd = pty.fork()
-        if pid == 0:
-            os.execve(sys.executable, command, environment)
-        self.children.append((pid, fd))
+        fd, slave = pty.openpty()
+        try:
+            process = subprocess.Popen(command, stdin=slave, stdout=slave,
+                                       stderr=slave, env=environment, start_new_session=True)
+        finally:
+            os.close(slave)
+        self.children.append((process, fd))
         self.until(fd, b'RUNNING')
-        return pid, fd
+        return process.pid, fd
+
+    def process(self, pid):
+        return next(process for process, _ in self.children if process.pid == pid)
 
     def until(self, fd, marker, timeout=8):
         end = time.monotonic() + timeout
@@ -147,15 +152,8 @@ class TerminalTests(unittest.TestCase):
                 os.read(fd, 65536)
 
     def finish(self, pid, fd, code):
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline:
-            done, status = os.waitpid(pid, os.WNOHANG)
-            if done:
-                self.assertEqual(os.waitstatus_to_exitcode(status), code)
-                self.assertTrue(termios.tcgetattr(fd)[3] & termios.ECHO)
-                return
-            time.sleep(.02)
-        self.fail('Timer did not exit after finishing')
+        self.assertEqual(self.process(pid).wait(timeout=5), code)
+        self.assertTrue(termios.tcgetattr(fd)[3] & termios.ECHO)
 
     def total(self):
         return stats.Store(self.path).totals()[0]
@@ -165,7 +163,7 @@ class TerminalTests(unittest.TestCase):
         os.write(fd, b' ')
         self.until(fd, b'PAUSED')
         self.drain(fd, 2.2)
-        self.assertEqual(os.waitpid(pid, os.WNOHANG), (0, 0))
+        self.assertIsNone(self.process(pid).poll())
         self.assertEqual(self.total(), 0)
         os.write(fd, b' ')
         self.until(fd, b'COMPLETE')
@@ -208,7 +206,7 @@ class TerminalTests(unittest.TestCase):
         pid, fd = self.launch(20)
         self.drain(fd, 5.3)
         os.kill(pid, signal.SIGKILL)
-        os.waitpid(pid, 0)
+        self.process(pid).wait(timeout=5)
         self.assertEqual(self.total(), 5)
 
 
